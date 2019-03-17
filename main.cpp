@@ -27,7 +27,7 @@ int main() {
 
 
   // ### System setup ### //
-  Map boids;
+  Map boids(WIDTH, HEIGHT);
   // spawn some boids randomly
   std::random_device rd;
   std::mt19937 rng;
@@ -54,6 +54,9 @@ int main() {
     SDL_Delay(16);
 
     // ### Engine step ### //
+    // rebuild position quadtree to speed up within_distance() calls
+    boids.rebuild_tree();
+
     // update boid velocity
     for (auto &b: boids) {
       b.update(boids.within_distance(b.get_position(), 50));
