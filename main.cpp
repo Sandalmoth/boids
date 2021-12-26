@@ -10,7 +10,7 @@
 
 
 const int WIDTH = 1024;
-const int HEIGHT = 768;
+const int HEIGHT = 1024;
 
 
 int main() {
@@ -27,7 +27,7 @@ int main() {
 
 
   // ### System setup ### //
-  Map boids;
+  Map boids(WIDTH, HEIGHT);
   // spawn some boids randomly
   std::random_device rd;
   std::mt19937 rng;
@@ -52,6 +52,8 @@ int main() {
   while (run) {
 
     SDL_Delay(16);
+
+    boids.regenerate_tree();
 
     // ### Engine step ### //
     // update boid velocity

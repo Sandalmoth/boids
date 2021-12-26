@@ -78,8 +78,8 @@ public:
     }
   }
 
-private:
   gmtl::Point2f p; // position
+private:
   gmtl::Vec2f v; // velocity
   gmtl::Vec2f v_prev; // needed for averaging headings
 };

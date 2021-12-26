@@ -29,7 +29,43 @@ void build_quadtree(const std::unique_ptr<QuadtreeNode> & root, int depth) {
   root->nw = std::make_unique<QuadtreeNode>();
   root->se = std::make_unique<QuadtreeNode>();
   root->sw = std::make_unique<QuadtreeNode>();
-  build_quadtree(root->ne, depth-1)
+  build_quadtree(root->ne, depth-1);
+  build_quadtree(root->nw, depth-1);
+  build_quadtree(root->se, depth-1);
+  build_quadtree(root->sw, depth-1);
+}
+
+
+void empty_quadtree(const std::unique_ptr<QuadtreeNode>& root) {
+  if (root == nullptr) return;
+
+  root->node_boids.empty();
+  empty_quadtree(root->ne);
+  empty_quadtree(root->nw);
+  empty_quadtree(root->se);
+  empty_quadtree(root->sw);
+}
+
+
+void quadtree_insert(const std::unique_ptr<QuadtreeNode>& root, const Boid* b, int width, int height, gmtl::Vec2f offset={0, 0}) {
+  if (root->ne == nullptr) {
+    root->node_boids.push_back(std::weak_ptr<Boid>(*b));
+    return;
+  }
+
+  if (b->p[0] < offset[0] + (width << 2)) {
+    if (b->p[1] < offset[1] + (height << 2)) {
+      quadtree_insert(root->ne, b, width << 2, height << 2, offset);
+    } else {
+      quadtree_insert(root->ne, b, width << 2, height << 2, offset + gmtl::Vec2f(0, height << 2));
+    }
+  } else {
+    if (b->p[1] < offset[1] + (height << 2)) {
+      quadtree_insert(root->ne, b, width << 2, height << 2, offset + gmtl::Vec2f(width << 2, 0));
+    } else {
+      quadtree_insert(root->ne, b, width << 2, height << 2, offset + gmtl::Vec2f(width << 2, height << 2));
+    }
+  }
 }
 
 
@@ -39,6 +75,15 @@ public:
     : width(width)
     , height(height) {
     root = std::make_unique<QuadtreeNode>();
+    build_quadtree(root, QUADTREE_LEVELS);
+  }
+
+
+  void regenerate_tree() {
+    empty_quadtree(root);
+    for (auto &b: boids) {
+      quadtree_insert(root, &b, width, height);
+    }
   }
 
 
