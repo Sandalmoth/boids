@@ -9,10 +9,22 @@
 
 #include "glm/glm.hpp"
 
+#define ECSOPLATM_IMPLEMENTATION
+#include "ecsoplatm.h"
+
 
 constexpr double LOGIC_DT = 0.1;
+constexpr int NUM_BOIDS = 1024;
+
+
 std::mutex triple_buffer_mutex;
 std::atomic<bool> running {true};
+
+
+struct Posbuf {
+  glm::vec2 prev;
+  glm::vec2 next;
+};
 
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
@@ -20,19 +32,46 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
 }
 
 
-void draw(GLFWwindow *window) {
+void draw(GLFWwindow *window, ecs::Component<Posbuf> &c_posbuf) {
 
   glfwMakeContextCurrent(window);
+
+  std::vector<glm::vec2> boid_buffer(NUM_BOIDS);
+
+  GLuint vao, vbo;
+  glGenVertexArrays(1, &vao);
+  glGenBuffers(1, &vbo);
+
+  glBindVertexArray(vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec2) * NUM_BOIDS,
+               nullptr, GL_DYNAMIC_DRAW);
+
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(glm::vec2),
+                        (void *)0);
+
   glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 
   while (running.load()) {
+
+    // harvest the interpolated positions
+
+    // then actually draw
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // draw here
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(glm::vec2) * NUM_BOIDS,
+                    boid_buffer.data());
+
+    glBindVertexArray(vao);
+    glDrawArrays(GL_POINTS, 0, NUM_BOIDS);
 
     glfwSwapBuffers(window);
   }
 
+  glDeleteVertexArrays(1, &vao);
+  glDeleteBuffers(1, &vbo);
 }
 
 
@@ -62,8 +101,12 @@ int main() {
 
   // program here
 
+  ecs::Component<Posbuf> c_posbuf; // locked by triple_buffer_mutex
+  ecs::Component<glm::vec2> c_pos;
+  ecs::Component<glm::vec2> c_vel;
+
   glfwMakeContextCurrent(nullptr);
-  std::thread draw_thread(&draw, window);
+  std::thread draw_thread(&draw, window, std::ref(c_posbuf));
 
   float alpha;
 
