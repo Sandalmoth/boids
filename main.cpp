@@ -56,6 +56,9 @@ int main() {
     boids.regenerate_tree();
 
     // ### Engine step ### //
+    // rebuild position quadtree to speed up within_distance() calls
+    boids.rebuild_tree();
+
     // update boid velocity
     for (auto &b: boids) {
       b.update(boids.within_distance(b.get_position(), 50));

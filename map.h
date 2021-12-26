@@ -2,6 +2,8 @@
 #define __MAP_H__
 
 
+#include <array>
+#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -18,11 +20,11 @@ struct QuadtreeNode {
   std::unique_ptr<QuadtreeNode> nw = nullptr;
   std::unique_ptr<QuadtreeNode> se = nullptr;
   std::unique_ptr<QuadtreeNode> sw = nullptr;
-  std::vector<std::weak_ptr<Boid>> node_boids;
+  std::vector<Boid*> node_boids;
 };
 
 
-void build_quadtree(const std::unique_ptr<QuadtreeNode> & root, int depth) {
+void build_quadtree(const std::unique_ptr<QuadtreeNode> &root, int depth) {
   if (depth < 1) return;
 
   root->ne = std::make_unique<QuadtreeNode>();
@@ -92,6 +94,18 @@ public:
   }
 
 
+  void rebuild_tree() {
+    empty_leaves(root, QUADTREE_LEVELS);
+    for (auto &b: boids) {
+      auto p = b.get_position();
+      float x_grid = width / (2 << QUADTREE_LEVELS);
+      float y_grid = height / (2 << QUADTREE_LEVELS);
+      leaves[static_cast<int>(p[0]/x_grid*(2 >> QUADTREE_LEVELS)) +
+             static_cast<int>(p[1]/y_grid)]->push_back(&b);
+    }
+  }
+
+
   auto begin() { return boids.begin(); }
   auto end() { return boids.end(); }
 
@@ -111,10 +125,13 @@ public:
 
 
 private:
-  const int width;
-  const int height;
+  const float width;
+  const float height;
 
   std::unique_ptr<QuadtreeNode> root;
+  // fast access to leaves for faster rebuilding
+  std::array<std::vector<Boid *> *,
+             (2 << QUADTREE_LEVELS) * (2 << QUADTREE_LEVELS)> leaves;
 
   std::vector<Boid> boids;
 };
