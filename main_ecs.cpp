@@ -1,6 +1,7 @@
 #include <atomic>
 #include <iostream>
 #include <mutex>
+#include <random>
 #include <thread>
 
 #include "glad/glad.h"
@@ -15,9 +16,14 @@
 
 constexpr double LOGIC_DT = 0.1;
 constexpr int NUM_BOIDS = 1024;
+constexpr float BOID_VEL = 0.05;
 
 
 std::mutex triple_buffer_mutex;
+
+double last_tick_time {0.0}; // should be manupulated under triple_buffer_mutex
+double next_tick_time {0.0}; // should be maipulated under triple_buffer_mutex
+
 std::atomic<bool> running {true};
 
 
@@ -53,9 +59,25 @@ void draw(GLFWwindow *window, ecs::Component<Posbuf> &c_posbuf) {
 
   glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 
+  // for tracking graphics fps
+  int frames = 0;
+  double frame_start = glfwGetTime();
+  double frame_time;
+
+  double alpha {0.0};
+
   while (running.load()) {
 
     // harvest the interpolated positions
+    {
+      std::scoped_lock lock(triple_buffer_mutex);
+      alpha = (glfwGetTime() - next_tick_time) / LOGIC_DT; // FIXME may have glitches
+
+      for (int i = 0; i < NUM_BOIDS; ++i) {
+        boid_buffer[i] = glm::mix(c_posbuf.data[i].second.prev,
+                                  c_posbuf.data[i].second.next, alpha);
+      }
+    }
 
     // then actually draw
     glClear(GL_COLOR_BUFFER_BIT);
@@ -68,6 +90,17 @@ void draw(GLFWwindow *window, ecs::Component<Posbuf> &c_posbuf) {
     glDrawArrays(GL_POINTS, 0, NUM_BOIDS);
 
     glfwSwapBuffers(window);
+
+    frame_time = glfwGetTime();
+    if (frame_time - frame_start > 1.0 || frames == 0) {
+      double fps = static_cast<double>(frames) / (frame_time - frame_start);
+      double frm_time =
+          (frame_time - frame_start) / static_cast<double>(frames);
+      frame_start = frame_time;
+      frames = 0;
+      std::cout << "fps\t" << fps << "\tframe_time\t" << frm_time << std::endl;
+    }
+    ++frames;
   }
 
   glDeleteVertexArrays(1, &vao);
@@ -76,7 +109,6 @@ void draw(GLFWwindow *window, ecs::Component<Posbuf> &c_posbuf) {
 
 
 int main() {
-
 
   glfwInit();
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -101,24 +133,46 @@ int main() {
 
   // program here
 
+  ecs::Manager ecs;
+
   ecs::Component<Posbuf> c_posbuf; // locked by triple_buffer_mutex
   ecs::Component<glm::vec2> c_pos;
   ecs::Component<glm::vec2> c_vel;
 
+  ecs.enlist(&c_posbuf);
+  ecs.enlist(&c_pos);
+  ecs.enlist(&c_vel);
+
+  // we haven't spawned the graphics thread yet
+  // so we don't need any synchronization
+  last_tick_time = glfwGetTime();
+  next_tick_time = glfwGetTime();
+
+  std::mt19937 rng;
+  rng.seed(2701);
+  std::uniform_real_distribution<float> dist(-1.0, 1.0);
+
+  for (int i = 0; i < NUM_BOIDS; ++i) {
+    auto id = ecs.get_id();
+    glm::vec2 pos(dist(rng), dist(rng));
+    glm::vec2 vel(dist(rng), dist(rng));
+    vel = glm::normalize(vel)*BOID_VEL;
+    c_pos.create(id, pos);
+    c_posbuf.create(id, Posbuf{pos - vel, pos});
+    c_vel.create(id, vel);
+  }
+  ecs.update();
+
+  // transfer graphics to separate thread
   glfwMakeContextCurrent(nullptr);
   std::thread draw_thread(&draw, window, std::ref(c_posbuf));
 
-  float alpha;
+  double alpha;
 
   // for maintaining gameloop timestep
   double start_time = glfwGetTime();
   double accumulator = 0.0;
   double current_time;
-
-  // for tracking graphics fps
-  int frames = 0;
-  double frame_start = glfwGetTime();
-  double frame_time;
 
   while (!glfwWindowShouldClose(window)) {
 
@@ -137,23 +191,19 @@ int main() {
 
       // logic here
 
+      {
+        std::scoped_lock lock(triple_buffer_mutex);
+        last_tick_time = next_tick_time;
+        next_tick_time = glfwGetTime();
+      }
+
       accumulator -= LOGIC_DT;
 
     }
 
     alpha = accumulator / LOGIC_DT;
 
-    // draw here ?
-
-    frame_time = glfwGetTime();
-    if (frame_time - frame_start > 1.0 || frames == 0) {
-      double fps = static_cast<double>(frames) / (frame_time - frame_start);
-      double frm_time = (frame_time - frame_start) / static_cast<double>(frames);
-      frame_start = frame_time;
-      frames = 0;
-      std::cout << "fps\t" << fps << "\tframe_time\t" << frm_time << std::endl;
-    }
-    ++frames;
+    // what goes here? input?
 
   }
 
