@@ -3,6 +3,7 @@
 #include <mutex>
 #include <random>
 #include <thread>
+#include <unordered_map>
 
 #include "glad/glad.h"
 
@@ -14,9 +15,13 @@
 #include "ecsoplatm.h"
 
 
+#include "shader.cpp"
+
+
 constexpr double LOGIC_DT = 0.1;
-constexpr int NUM_BOIDS = 1024;
+constexpr int NUM_BOIDS = 256;
 constexpr float BOID_VEL = 0.05;
+constexpr float SENSE_RAD = 0.1;
 
 
 std::mutex triple_buffer_mutex;
@@ -33,14 +38,54 @@ struct Posbuf {
 };
 
 
+int hashable(glm::vec2 v) {
+  // convert for use in spatial hash
+  int x = v.x/SENSE_RAD;
+  int y = v.y/SENSE_RAD;
+  return x ^ y;
+}
+
+
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+  glfwMakeContextCurrent(window); // unsure about this...
   glViewport(0, 0, width, height);
+}
+
+
+void move(glm::vec2 &pos, glm::vec2 &vel) {
+  pos += vel;
+  if (pos.x < -1.0f) {
+    pos.x = -2.0f - pos.x;
+    vel.x = -vel.x;
+  }
+  if (pos.y < -1.0f) {
+    pos.y = -2.0f - pos.y;
+    vel.y = -vel.y;
+  }
+  if (pos.x > 1.0f) {
+    pos.x = 2.0f - pos.x;
+    vel.x = -vel.x;
+  }
+  if (pos.y > 1.0f) {
+    pos.y = 2.0f - pos.y;
+    vel.y = -vel.y;
+  }
+}
+
+void update_posbuf(glm::vec2 &pos, Posbuf &posbuf) {
+  posbuf.prev = posbuf.next;
+  posbuf.next = pos;
 }
 
 
 void draw(GLFWwindow *window, ecs::Component<Posbuf> &c_posbuf) {
 
   glfwMakeContextCurrent(window);
+  glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+  GLuint shader = load_shaders();
+  glUseProgram(shader);
+  glDisable(GL_DEPTH_TEST);
 
   std::vector<glm::vec2> boid_buffer(NUM_BOIDS);
 
@@ -80,6 +125,7 @@ void draw(GLFWwindow *window, ecs::Component<Posbuf> &c_posbuf) {
     }
 
     // then actually draw
+    glUseProgram(shader);
     glClear(GL_COLOR_BUFFER_BIT);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -128,8 +174,8 @@ int main() {
     return -1;
   }
 
-  glViewport(0, 0, 800, 600);
-  glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+  glViewport(0, 0, 400, 300);
+  // glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
   // program here
 
@@ -174,6 +220,8 @@ int main() {
   double accumulator = 0.0;
   double current_time;
 
+  std::unordered_multimap<int, uint32_t> spatial_hash;
+
   while (!glfwWindowShouldClose(window)) {
 
     current_time = glfwGetTime();
@@ -190,11 +238,23 @@ int main() {
     while (accumulator > LOGIC_DT) {
 
       // logic here
+      // first build our spatial hash
+      spatial_hash.clear();
+      for (auto [id, pos]: c_pos.data) {
+        spatial_hash.insert(std::make_pair(hashable(pos), id));
+      }
+
+      // then update all the boids
+      ecs.apply(&move, c_pos, c_vel);
+      ecs.wait();
 
       {
         std::scoped_lock lock(triple_buffer_mutex);
         last_tick_time = next_tick_time;
         next_tick_time = glfwGetTime();
+
+        ecs.apply(&update_posbuf, c_pos, c_posbuf);
+        ecs.wait();
       }
 
       accumulator -= LOGIC_DT;
