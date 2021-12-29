@@ -19,9 +19,13 @@
 
 
 constexpr double LOGIC_DT = 0.1;
-constexpr int NUM_BOIDS = 256;
+constexpr int NUM_BOIDS = 2048;
+
 constexpr float BOID_VEL = 0.05;
 constexpr float SENSE_RAD = 0.1;
+constexpr float BOID_CENTER = 0.002;
+constexpr float BOID_NEAR = 0.02;
+constexpr float BOID_STEER = 0.03;
 
 
 std::mutex triple_buffer_mutex;
@@ -46,11 +50,84 @@ int hashable(glm::vec2 v) {
 }
 
 
+std::vector<uint32_t> neighbours(glm::vec2 v,
+                                 std::unordered_multimap<int, uint32_t> *spatial_hash,
+                                 ecs::Component<glm::vec2> *c_pos) {
+  // returns the neighbours of a point
+  std::vector<uint32_t> result;
+  glm::vec2 dx(SENSE_RAD, 0.0);
+  glm::vec2 dy(0.0, SENSE_RAD);
+
+  std::vector<int> hashes;
+  hashes.reserve(9);
+  hashes.push_back(hashable(v));
+  hashes.push_back(hashable(v + dx));
+  hashes.push_back(hashable(v - dx));
+  hashes.push_back(hashable(v + dy));
+  hashes.push_back(hashable(v - dy));
+  hashes.push_back(hashable(v + dx + dy));
+  hashes.push_back(hashable(v + dx - dy));
+  hashes.push_back(hashable(v - dx + dy));
+  hashes.push_back(hashable(v - dx - dy));
+
+  for (auto hash: hashes) {
+    auto range = spatial_hash->equal_range(hash);
+    for (auto it = range.first; it != range.second; ++it) {
+      glm::vec2 other = *(*c_pos)[it->second];
+      if (glm::dot(other - v, other - v) < SENSE_RAD*SENSE_RAD) {
+        result.push_back(it->second);
+      }
+    }
+  }
+
+  return result;
+}
+
+
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glfwMakeContextCurrent(window); // unsure about this...
   glViewport(0, 0, width, height);
+  // alternative implementation, update some atomic width height
+  // and then update viewport in draw thread
 }
 
+struct update_vel_payload {
+  ecs::Component<glm::vec2> *c_pos;
+  ecs::Component<glm::vec2> *c_vel;
+  std::unordered_multimap<int, uint32_t> *spatial_hash;
+};
+
+void update_vel(glm::vec2 &pos, glm::vec2 &vel, void *payload) {
+  // NOTE having a boid struct with pos and vel would be more elegant
+  auto pl = static_cast<update_vel_payload *>(payload);
+  auto nbs = neighbours(pos, pl->spatial_hash, pl->c_pos);
+
+  glm::vec2 center(0.0f);
+  glm::vec2 near(0.0f);
+  for (auto nb: nbs) {
+    glm::vec2 *p = (*(pl->c_pos))[nb]; // confusinsg operator precedence
+    center += *p;
+    near -= (*p) - pos;
+  }
+  center /= static_cast<float>(pl->c_pos->data.size());
+  center = center - pos;
+
+  glm::vec2 steer(0.0f);
+  for (auto nb: nbs) {
+    glm::vec2 *v = (*(pl->c_vel))[nb];
+    steer += *v;
+  }
+  steer /= static_cast<float>(pl->c_vel->data.size());
+
+  center = glm::normalize(center);
+  near = glm::normalize(near);
+  steer = glm::normalize(steer);
+
+  vel = BOID_VEL*glm::normalize(vel +
+                                BOID_CENTER*center +
+                                BOID_NEAR*near +
+                                BOID_STEER*steer);
+}
 
 void move(glm::vec2 &pos, glm::vec2 &vel) {
   pos += vel;
@@ -245,6 +322,8 @@ int main() {
       }
 
       // then update all the boids
+      update_vel_payload uv_payload(&c_pos, &c_vel, &spatial_hash);
+      ecs.apply(&update_vel, c_pos, c_vel, static_cast<void *>(&uv_payload));
       ecs.apply(&move, c_pos, c_vel);
       ecs.wait();
 
