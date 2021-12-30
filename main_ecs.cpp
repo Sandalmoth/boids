@@ -119,9 +119,12 @@ void update_vel(glm::vec2 &pos, glm::vec2 &vel, void *payload) {
   }
   steer /= static_cast<float>(pl->c_vel->data.size());
 
-  center = glm::normalize(center);
-  near = glm::normalize(near);
-  steer = glm::normalize(steer);
+  if (glm::length(center) > 0.0f)
+    center = glm::normalize(center);
+  if (glm::length(near) > 0.0f)
+    near = glm::normalize(near);
+  if (glm::length(steer) > 0.0f)
+    steer = glm::normalize(steer);
 
   vel = BOID_VEL*glm::normalize(vel +
                                 BOID_CENTER*center +
