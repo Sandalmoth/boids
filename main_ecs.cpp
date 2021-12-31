@@ -19,7 +19,7 @@
 
 
 constexpr double LOGIC_DT = 0.1;
-constexpr int NUM_BOIDS = 2048;
+constexpr int NUM_BOIDS = 4096;
 
 constexpr float BOID_VEL = 0.05;
 constexpr float SENSE_RAD = 0.1;
@@ -300,6 +300,12 @@ int main() {
   double accumulator = 0.0;
   double current_time;
 
+  // for trackin the time taken
+  // so we can optimize
+  double logic_time = 0.0;
+  double worst_logic_time = 0.0;
+  int logic_ticks = 0;
+
   std::unordered_multimap<int, uint32_t> spatial_hash;
 
   while (!glfwWindowShouldClose(window)) {
@@ -316,6 +322,8 @@ int main() {
     glfwPollEvents();
 
     while (accumulator > LOGIC_DT) {
+
+      auto logic_timer = [start = glfwGetTime()]{ return glfwGetTime() - start; };
 
       // logic here
       // first build our spatial hash
@@ -340,6 +348,18 @@ int main() {
       }
 
       accumulator -= LOGIC_DT;
+
+      logic_time += logic_timer();
+      worst_logic_time = std::max(logic_timer(), worst_logic_time);
+      ++logic_ticks;
+
+      if (logic_ticks == 9) {
+        std::cout << "Averageg logic step: " << logic_time/10.0;
+        std::cout << "\tWorst: " << worst_logic_time << std::endl;
+        logic_ticks = 0;
+        logic_time = 0.0;
+        worst_logic_time = 0.0;
+      }
 
     }
 
